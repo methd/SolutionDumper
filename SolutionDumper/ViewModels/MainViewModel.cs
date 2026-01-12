@@ -149,14 +149,28 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         var projDir = Path.GetDirectoryName(p.CsprojPath)!;
 
-        foreach (var file in ProjectScanner.EnumerateProjectFiles(p.CsprojPath, _scanOptions))
-            AddPathAsTree(projNode, projDir, file);
+        foreach (var pf in ProjectScanner.EnumerateProjectFiles(p.CsprojPath, _scanOptions))
+        {
+            bool tooLarge = pf.SizeBytes > _scanOptions.MaxFileSizeBytes;
+
+            var tooltip = tooLarge
+                ? $"Excluded by size limit ({pf.SizeBytes / 1024} KB)"
+                : null;
+
+            AddPathAsTree(
+                projNode,
+                projDir,
+                pf.FullPath,
+                isSelectable: !tooLarge,
+                fileSize: pf.SizeBytes,
+                tooltip: tooltip);
+        }
 
         projNode.IsChecked = false;
         return projNode;
     }
 
-    private void AddPathAsTree(TreeNodeViewModel projectNode, string projectDir, string fullPath)
+    private void AddPathAsTree(TreeNodeViewModel projectNode, string projectDir, string fullPath, bool isSelectable, long fileSize, string? tooltip)
     {
         var rel = Path.GetRelativePath(projectDir, fullPath);
         var parts = rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -183,7 +197,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
                 if (existingFolder == null)
                 {
-                    var folder = new TreeNodeViewModel(name, null, isFile: false);
+                    var folder = new TreeNodeViewModel(name, null, isFile: false, isSelectable, fileSize, tooltip);
                     current.AddChild(folder);
                     current = folder;
                 }
@@ -207,7 +221,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
                 if (!exists)
                 {
-                    var fileNode = new TreeNodeViewModel(name, fullPath, isFile: true);
+                    var fileNode = new TreeNodeViewModel(name, fullPath, isFile: true, isSelectable, fileSize, tooltip);
                     current.AddChild(fileNode);
                 }
             }

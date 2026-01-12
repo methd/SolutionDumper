@@ -11,8 +11,13 @@ public sealed class TreeNodeViewModel : INotifyPropertyChanged
     public string? FullPath { get; }
     public bool IsFile { get; }
 
-    public ObservableCollection<TreeNodeViewModel> Children { get; } = new();
+    public long? FileSizeBytes { get; }
 
+    public bool IsSelectable { get; }
+
+    public string? Tooltip { get; }
+
+    public ObservableCollection<TreeNodeViewModel> Children { get; } = new();
     public bool HasChildren => Children.Count > 0;
 
     private bool? _isChecked = false;
@@ -21,6 +26,9 @@ public sealed class TreeNodeViewModel : INotifyPropertyChanged
         get => _isChecked;
         set
         {
+            if (!IsSelectable)
+                return;
+
             if (_isChecked == value) return;
 
             _isChecked = value;
@@ -30,7 +38,6 @@ public sealed class TreeNodeViewModel : INotifyPropertyChanged
                 SetChildrenChecked(value.Value);
 
             Parent?.UpdateFromChildren();
-
             BubbleCheckedChanged();
         }
     }
@@ -54,11 +61,20 @@ public sealed class TreeNodeViewModel : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
     public event Action<TreeNodeViewModel>? CheckedChanged;
 
-    public TreeNodeViewModel(string displayName, string? fullPath, bool isFile)
+    public TreeNodeViewModel(
+        string displayName,
+        string? fullPath,
+        bool isFile,
+        bool isSelectable = true,
+        long? fileSizeBytes = null,
+        string? tooltip = null)
     {
         DisplayName = displayName;
         FullPath = fullPath;
         IsFile = isFile;
+        IsSelectable = isSelectable;
+        FileSizeBytes = fileSizeBytes;
+        Tooltip = tooltip;
 
         Children.CollectionChanged += OnChildrenChanged;
     }
@@ -80,6 +96,9 @@ public sealed class TreeNodeViewModel : INotifyPropertyChanged
 
     private void SetCheckedInternal(bool value)
     {
+        if (!IsSelectable)
+            return;
+
         _isChecked = value;
         OnPropertyChanged(nameof(IsChecked));
 
@@ -99,9 +118,7 @@ public sealed class TreeNodeViewModel : INotifyPropertyChanged
             var v = Children[i].IsChecked;
             if (v != true) allTrue = false;
             if (v != false) allFalse = false;
-
-            if (!allTrue && !allFalse)
-                break;
+            if (!allTrue && !allFalse) break;
         }
 
         bool? newValue = allTrue ? true : allFalse ? false : null;

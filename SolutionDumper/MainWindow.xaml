@@ -2,9 +2,11 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:SolutionDumper.ViewModels"
+        xmlns:conv="clr-namespace:SolutionDumper.Converters"
         Title="Solution Dumper" Height="750" Width="1200">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+        <conv:BoolToGrayBrushConverter x:Key="BoolToGrayConverter"/>
     </Window.Resources>
 
     <Grid>
@@ -66,12 +68,17 @@
                         <TreeView.Resources>
                             <HierarchicalDataTemplate DataType="{x:Type vm:TreeNodeViewModel}"
                                                       ItemsSource="{Binding Children}">
-                                <StackPanel Orientation="Horizontal">
+                                <StackPanel Orientation="Horizontal"
+                                            ToolTip="{Binding Tooltip}">
+
                                     <CheckBox IsThreeState="{Binding HasChildren}"
                                               IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                                              IsEnabled="{Binding IsSelectable}"
                                               VerticalAlignment="Center"/>
+
                                     <TextBlock Text="{Binding DisplayName}"
-                                               Margin="6,0,0,0"/>
+                                               Margin="6,0,0,0"
+                                               Foreground="{Binding IsSelectable, Converter={StaticResource BoolToGrayConverter}}"/>
                                 </StackPanel>
                             </HierarchicalDataTemplate>
                         </TreeView.Resources>
