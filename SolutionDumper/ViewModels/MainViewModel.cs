@@ -1,6 +1,5 @@
 ﻿using Microsoft.Win32;
 using SolutionDumper.Services;
-using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
@@ -43,7 +42,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
 
     private readonly DispatcherTimer _statusTimer;
-    private int _statusToken;
 
     private string? _statusText;
     public string? StatusText
@@ -66,7 +64,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public RelayCommand OpenSlnCommand { get; }
     public RelayCommand ExportCommand { get; }
-
     public RelayCommand CopyToClipboardCommand { get; }
 
     private readonly ScanOptions _scanOptions = new();
@@ -84,8 +81,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private readonly List<string> _rest = new(2048);
 
     private readonly HashSet<string> _seen = new(StringComparer.OrdinalIgnoreCase);
-
     private readonly Dictionary<string, long> _sizeCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly List<TreeNodeViewModel> _filterNodesPostOrder = new(8192);
+    private readonly Dictionary<TreeNodeViewModel, int> _filterIndex = new();
+    private string[] _filterKeyLower = Array.Empty<string>();
+    private int[] _parentIndex = Array.Empty<int>();
+    private CancellationTokenSource? _filterCts;
 
     public MainViewModel()
     {
@@ -93,11 +95,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
         ExportCommand = new RelayCommand(_ => Export(), _ => SelectedFiles.Count > 0);
         CopyToClipboardCommand = new RelayCommand(_ => CopyToClipboard(), _ => SelectedFiles.Count > 0);
 
-        _filterTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+        _filterTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(220) };
         _filterTimer.Tick += (_, _) =>
         {
             _filterTimer.Stop();
-            ApplyTreeFilter();
+            _ = ApplyTreeFilterAsync();
         };
 
         _rebuildTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(60) };
@@ -176,7 +178,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         Roots.Add(rootNode);
 
-        ApplyTreeFilter();
+        RebuildFilterIndex();
+
+        _ = ApplyTreeFilterAsync();
         ScheduleRebuildSelectedFiles();
 
         ShowSuccess($"Loaded '{solutionName}' ({projects.Count} projects)");
@@ -270,52 +274,152 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    private void ApplyTreeFilter()
+    private void RebuildFilterIndex()
     {
-        string term = (_filterText ?? "").Trim();
+        _filterNodesPostOrder.Clear();
+        _filterIndex.Clear();
+
+        for (int r = 0; r < Roots.Count; r++)
+            CollectPostOrder(Roots[r]);
+
+        _filterKeyLower = new string[_filterNodesPostOrder.Count];
+        _parentIndex = new int[_filterNodesPostOrder.Count];
+
+        for (int i = 0; i < _filterNodesPostOrder.Count; i++)
+            _filterIndex[_filterNodesPostOrder[i]] = i;
+
+        for (int i = 0; i < _filterNodesPostOrder.Count; i++)
+        {
+            var n = _filterNodesPostOrder[i];
+
+            var dn = n.DisplayName ?? "";
+            var fp = n.FullPath ?? "";
+            _filterKeyLower[i] = (dn + " " + fp).ToLowerInvariant();
+
+            if (n.Parent != null && _filterIndex.TryGetValue(n.Parent, out var pi))
+                _parentIndex[i] = pi;
+            else
+                _parentIndex[i] = -1;
+        }
+    }
+
+    private void CollectPostOrder(TreeNodeViewModel node)
+    {
+        for (int i = 0; i < node.Children.Count; i++)
+            CollectPostOrder(node.Children[i]);
+
+        _filterNodesPostOrder.Add(node);
+    }
+
+    private async Task ApplyTreeFilterAsync()
+    {
+        _filterCts?.Cancel();
+        _filterCts?.Dispose();
+        _filterCts = new CancellationTokenSource();
+        var ct = _filterCts.Token;
+
         if (Roots.Count == 0) return;
+
+        string term = (_filterText ?? "").Trim();
 
         if (string.IsNullOrWhiteSpace(term))
         {
-            for (int i = 0; i < Roots.Count; i++)
-                SetVisibleRecursive(Roots[i], true);
+            await Application.Current.Dispatcher.InvokeAsync(() =>
+            {
+                ShowAllAndCollapseToCheckedPaths();
+            }, DispatcherPriority.Background);
+
             return;
         }
 
-        for (int i = 0; i < Roots.Count; i++)
+        var nodes = _filterNodesPostOrder.ToArray();
+        var keys = _filterKeyLower;
+        var parent = _parentIndex;
+
+        string termLower = term.ToLowerInvariant();
+
+        bool[] visible;
+        try
         {
-            var r = Roots[i];
-            UpdateVisibilityByFilter(r, term);
-            r.IsVisible = true;
-            r.IsExpanded = true;
+            visible = await Task.Run(() =>
+            {
+                ct.ThrowIfCancellationRequested();
+
+                int n = nodes.Length;
+                var childHasVisible = new bool[n];
+                var vis = new bool[n];
+
+                for (int i = 0; i < n; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    bool selfMatch = keys[i].Contains(termLower);
+                    bool isVisible = selfMatch || childHasVisible[i];
+                    vis[i] = isVisible;
+
+                    if (isVisible)
+                    {
+                        int pi = parent[i];
+                        if (pi >= 0)
+                            childHasVisible[pi] = true;
+                    }
+                }
+
+                return vis;
+            }, ct);
         }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        await Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            for (int i = 0; i < nodes.Length; i++)
+                nodes[i].IsVisible = visible[i];
+
+            for (int r = 0; r < Roots.Count; r++)
+                Roots[r].IsVisible = true;
+
+        }, DispatcherPriority.Background);
     }
 
-    private static void SetVisibleRecursive(TreeNodeViewModel node, bool visible)
+    private void ShowAllAndCollapseToCheckedPaths()
     {
-        node.IsVisible = visible;
-        for (int i = 0; i < node.Children.Count; i++)
-            SetVisibleRecursive(node.Children[i], visible);
-    }
-
-    private static bool UpdateVisibilityByFilter(TreeNodeViewModel node, string term)
-    {
-        bool selfMatch =
-            node.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
-            (node.FullPath != null && node.FullPath.Contains(term, StringComparison.OrdinalIgnoreCase));
-
-        bool anyChildVisible = false;
-        for (int i = 0; i < node.Children.Count; i++)
+        for (int i = 0; i < _filterNodesPostOrder.Count; i++)
         {
-            if (UpdateVisibilityByFilter(node.Children[i], term))
-                anyChildVisible = true;
+            var n = _filterNodesPostOrder[i];
+            n.IsVisible = true;
+        }
+        for (int r = 0; r < Roots.Count; r++)
+            Roots[r].IsVisible = true;
+
+        for (int i = 0; i < _filterNodesPostOrder.Count; i++)
+        {
+            var n = _filterNodesPostOrder[i];
+            if (n.IsExpanded)
+                n.IsExpanded = false;
         }
 
-        node.IsVisible = selfMatch || anyChildVisible;
-        if (node.IsVisible)
-            node.IsExpanded = true;
+        for (int i = 0; i < _filterNodesPostOrder.Count; i++)
+        {
+            var n = _filterNodesPostOrder[i];
+            if (n.IsChecked != true) continue;
 
-        return node.IsVisible;
+            var p = n.Parent;
+            while (p != null)
+            {
+                if (!p.IsExpanded)
+                    p.IsExpanded = true;
+                p = p.Parent;
+            }
+        }
+
+        for (int r = 0; r < Roots.Count; r++)
+        {
+            if (!Roots[r].IsExpanded)
+                Roots[r].IsExpanded = true;
+        }
     }
 
     private void RebuildSelectedFilesCore()

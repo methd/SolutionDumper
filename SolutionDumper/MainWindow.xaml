@@ -55,7 +55,10 @@
                                    Margin="0,4,0,0"/>
                     </StackPanel>
 
-                    <TreeView ItemsSource="{Binding Roots}">
+                    <TreeView ItemsSource="{Binding Roots}"
+                              VirtualizingStackPanel.IsVirtualizing="True"
+                              VirtualizingStackPanel.VirtualizationMode="Recycling"
+                              ScrollViewer.CanContentScroll="True">
                         <TreeView.ItemContainerStyle>
                             <Style TargetType="{x:Type TreeViewItem}">
                                 <Setter Property="IsExpanded"
@@ -119,7 +122,7 @@
             </Grid.ColumnDefinitions>
 
             <WrapPanel Grid.Column="0"
-               Orientation="Horizontal">
+                       Orientation="Horizontal">
 
                 <WrapPanel.Resources>
                     <Style TargetType="Button">
@@ -129,10 +132,10 @@
                 </WrapPanel.Resources>
 
                 <Button Content="Export…"
-                Command="{Binding ExportCommand}" />
+                        Command="{Binding ExportCommand}" />
 
                 <Button Content="Copy to Clipboard"
-                Command="{Binding CopyToClipboardCommand}" />
+                        Command="{Binding CopyToClipboardCommand}" />
 
             </WrapPanel>
 
