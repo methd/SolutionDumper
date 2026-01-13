@@ -1,9 +1,11 @@
 ﻿using Microsoft.Win32;
 using SolutionDumper.Services;
+using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Windows;
 using System.Windows.Threading;
 
 namespace SolutionDumper.ViewModels;
@@ -40,11 +42,32 @@ public sealed class MainViewModel : INotifyPropertyChanged
         private set { _selectedFileCount = value; OnPropertyChanged(); }
     }
 
+    private readonly DispatcherTimer _statusTimer;
+    private int _statusToken;
+
+    private string? _statusText;
+    public string? StatusText
+    {
+        get => _statusText;
+        private set { _statusText = value; OnPropertyChanged(); }
+    }
+
+    private StatusKind _statusKind;
+    public StatusKind StatusKind
+    {
+        get => _statusKind;
+        private set { _statusKind = value; OnPropertyChanged(); }
+    }
+
+    public bool HasStatus => !string.IsNullOrWhiteSpace(StatusText);
+
     private long _selectedTotalSize;
     public string SelectedTotalSizeText => $"{_selectedTotalSize / 1024.0 / 1024.0:0.00} MB";
 
     public RelayCommand OpenSlnCommand { get; }
     public RelayCommand ExportCommand { get; }
+
+    public RelayCommand CopyToClipboardCommand { get; }
 
     private readonly ScanOptions _scanOptions = new();
     private string _rootDir = "";
@@ -68,6 +91,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         OpenSlnCommand = new RelayCommand(_ => OpenSln());
         ExportCommand = new RelayCommand(_ => Export(), _ => SelectedFiles.Count > 0);
+        CopyToClipboardCommand = new RelayCommand(_ => CopyToClipboard(), _ => SelectedFiles.Count > 0);
 
         _filterTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         _filterTimer.Tick += (_, _) =>
@@ -81,6 +105,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             _rebuildTimer.Stop();
             RebuildSelectedFilesCore();
+        };
+
+        _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
+        _statusTimer.Tick += (_, _) =>
+        {
+            _statusTimer.Stop();
+            StatusText = null;
+            OnPropertyChanged(nameof(HasStatus));
         };
     }
 
@@ -105,7 +137,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
         };
         if (dlg.ShowDialog() != true) return;
 
-        LoadSolution(dlg.FileName);
+        try
+        {
+            ShowInfo("Loading solution…", ms: 0);
+            LoadSolution(dlg.FileName);
+        }
+        catch (Exception e)
+        {
+            ShowError($"Failed to load solution: {e.Message}");
+        }
     }
 
     private void LoadSolution(string slnPath)
@@ -138,6 +178,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         ApplyTreeFilter();
         ScheduleRebuildSelectedFiles();
+
+        ShowSuccess($"Loaded '{solutionName}' ({projects.Count} projects)");
     }
 
     private TreeNodeViewModel BuildProjectTree(SlnProject p)
@@ -361,6 +403,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(SelectedTotalSizeText));
 
         ExportCommand.RaiseCanExecuteChanged();
+        CopyToClipboardCommand.RaiseCanExecuteChanged();
     }
 
     private void AppendCheckedSlnFirst(List<string> ordered)
@@ -435,8 +478,42 @@ public sealed class MainViewModel : INotifyPropertyChanged
         };
         if (dlg.ShowDialog() != true) return;
 
-        var outPath = dlg.FileName;
-        using var w = new StreamWriter(outPath, false, System.Text.Encoding.UTF8);
+        try
+        {
+            ShowInfo("Exporting…", ms: 0);
+
+            using var fs = new FileStream(dlg.FileName, FileMode.Create, FileAccess.Write, FileShare.None);
+            using var w = new StreamWriter(fs, System.Text.Encoding.UTF8);
+
+            WriteDump(w);
+
+            ShowSuccess($"Exported ({SelectedFiles.Count} files)");
+        }
+        catch (Exception e)
+        {
+            ShowError($"Export failed: {e.Message}");
+        }
+    }
+
+    private void CopyToClipboard()
+    {
+        try
+        {
+            using var sw = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
+            WriteDump(sw);
+
+            Clipboard.SetText(sw.ToString());
+            ShowSuccess($"Copied ({SelectedFiles.Count} files)");
+        }
+        catch (Exception e)
+        {
+            ShowError($"Failed to copy: {e.Message}");
+        }
+    }
+
+    private void WriteDump(TextWriter w)
+    {
+        char[] buffer = new char[32 * 1024];
 
         w.WriteLine($"### CODE DUMP GENERATED: {DateTime.Now:O}");
         w.WriteLine($"### SLN: {Path.GetFileName(SlnPath)}");
@@ -453,7 +530,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
             try
             {
-                w.Write(File.ReadAllText(file));
+                using var r = new StreamReader(file);
+                int read;
+                while ((read = r.Read(buffer, 0, buffer.Length)) > 0)
+                    w.Write(buffer, 0, read);
             }
             catch (Exception e)
             {
@@ -466,6 +546,28 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         try { return Path.GetRelativePath(root, file).Replace('\\', '/'); }
         catch { return file.Replace('\\', '/'); }
+    }
+
+    private void ShowInfo(string text, int ms = 1500) => ShowStatus(text, StatusKind.Info, ms);
+    private void ShowSuccess(string text, int ms = 1500) => ShowStatus(text, StatusKind.Success, ms);
+    private void ShowWarning(string text, int ms = 2000) => ShowStatus(text, StatusKind.Warning, ms);
+    private void ShowError(string text, int ms = 3000) => ShowStatus(text, StatusKind.Error, ms);
+
+    private void ShowStatus(string text, StatusKind kind, int ms)
+    {
+        StatusKind = kind;
+        StatusText = text;
+        OnPropertyChanged(nameof(HasStatus));
+
+        if (ms <= 0)
+        {
+            _statusTimer.Stop();
+            return;
+        }
+
+        _statusTimer.Interval = TimeSpan.FromMilliseconds(ms);
+        _statusTimer.Stop();
+        _statusTimer.Start();
     }
 
     private sealed class RelPathComparer : IComparer<string>

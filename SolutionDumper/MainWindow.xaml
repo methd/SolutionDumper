@@ -112,10 +112,57 @@
             </Border>
         </Grid>
 
-        <DockPanel Margin="10" Grid.Row="2" LastChildFill="False">
-            <Button Content="Export…"
-                    Width="120"
-                    Command="{Binding ExportCommand}"/>
-        </DockPanel>
+        <Grid Margin="10" Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <WrapPanel Grid.Column="0"
+               Orientation="Horizontal">
+
+                <WrapPanel.Resources>
+                    <Style TargetType="Button">
+                        <Setter Property="MinWidth" Value="120"/>
+                        <Setter Property="Margin" Value="0,0,8,8"/>
+                    </Style>
+                </WrapPanel.Resources>
+
+                <Button Content="Export…"
+                Command="{Binding ExportCommand}" />
+
+                <Button Content="Copy to Clipboard"
+                Command="{Binding CopyToClipboardCommand}" />
+
+            </WrapPanel>
+
+            <TextBlock Grid.Column="1"
+                       Text="{Binding StatusText}"
+                       VerticalAlignment="Center"
+                       Margin="12,0,0,0"
+                       FontStyle="Italic">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="Gray"/>
+                        <Setter Property="Visibility" Value="Collapsed"/>
+
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding HasStatus}" Value="True">
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding StatusKind}" Value="Success">
+                                <Setter Property="Foreground" Value="Green"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding StatusKind}" Value="Warning">
+                                <Setter Property="Foreground" Value="DarkOrange"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding StatusKind}" Value="Error">
+                                <Setter Property="Foreground" Value="Crimson"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </Grid>
     </Grid>
 </Window>
