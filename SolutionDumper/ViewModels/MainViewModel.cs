@@ -100,7 +100,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         var dlg = new OpenFileDialog
         {
-            Filter = "Solution (*.sln)|*.sln",
+            Filter = "Solution (*.sln;*.slnx)|*.sln;*.slnx",
             Title = "Open solution"
         };
         if (dlg.ShowDialog() != true) return;
@@ -372,13 +372,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
             {
                 var child = root.Children[i];
                 if (!child.IsFile) continue;
-                if (child.FullPath == null) continue;
-                if (!child.FullPath.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)) continue;
+
+                var path = child.FullPath;
+                if (path == null) continue;
+
+                if (!(path.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) ||
+                      path.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase)))
+                    continue;
 
                 if (child.IsChecked == true)
                 {
-                    if (_seen.Add(child.FullPath))
-                        ordered.Add(child.FullPath);
+                    if (_seen.Add(path))
+                        ordered.Add(path);
                 }
             }
         }

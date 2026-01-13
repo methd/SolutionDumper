@@ -12,7 +12,7 @@ public sealed class ScanOptions
     {
         // C# / MSBuild
         ".cs", ".csproj", ".props", ".targets", ".sln",
-        ".resx",
+        ".resx", ".slnx",
     
         // Blazor / Razor
         ".razor", ".cshtml",
